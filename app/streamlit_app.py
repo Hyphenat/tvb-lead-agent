@@ -63,6 +63,27 @@ def get_store() -> Store:
     return _store_for(get_settings().db_path)
 
 
+@st.cache_resource(show_spinner=False)
+def prime_bank(db_path: str) -> int:
+    """Open with the agent's real output instead of an empty page.
+
+    A reviewer should be able to judge the work before deciding whether to spend
+    their own API credits on a live run. The shipped bank is replayed into the
+    database through the ordinary writers, so it is read back through the
+    ordinary reader - and that reader re-checks every lead against the current
+    rules. Nothing here bypasses a gate; it only saves a first run.
+    """
+    from tvb_agent.seed import load_bank
+
+    store = _store_for(db_path)
+    if store.all_time_qualified_count():
+        return 0          # this database already has its own leads
+    try:
+        return load_bank(store)
+    except Exception:      # pragma: no cover - a bad bank must not break the page
+        return 0
+
+
 def init_state() -> None:
     st.session_state.setdefault("thread", None)
     st.session_state.setdefault("run_id", None)
@@ -519,6 +540,17 @@ from the gates alone, before any score exists.
 
 
 # --------------------------------------------------------------------------- #
+def shipped_here(leads) -> int:
+    """How many of these leads came from the shipped bank, not a run on this page."""
+    try:
+        from tvb_agent.seed import shipped_company_ids
+
+        ids = shipped_company_ids()
+    except Exception:      # pragma: no cover - defensive
+        return 0
+    return sum(1 for lead_ in leads if lead_.company.id in ids)
+
+
 def settings_hero():
     """Settings, for the hero button's enabled state."""
     return get_settings()
@@ -533,6 +565,7 @@ def main() -> None:
     st.caption("Non-US technology companies with $1M–$5M raised or earned, a named founder, "
                "and a verified founder email — each with the evidence behind it.")
 
+    prime_bank(get_settings().db_path)
     store_now = get_store()
     banked = store_now.leads(qualified_only=True)
     running_now = bool(st.session_state.get("thread") and st.session_state["thread"].is_alive())
@@ -546,6 +579,13 @@ def main() -> None:
                        "Each one is re-checked against the current rules every time this page "
                        "loads, so a lead found under an older, weaker rule is dropped rather "
                        "than grandfathered in.")
+        shipped = shipped_here(banked)
+        if shipped:
+            fresh = len(banked) - shipped
+            st.caption(
+                f"{shipped} shipped with the repository, from earlier runs on the live web"
+                + (f" · {fresh} found by a run started here." if fresh else ".")
+            )
     with hero_right:
         st.write("")
         if st.button("▶  Run the agent now", type="primary", use_container_width=True,
@@ -569,7 +609,13 @@ def main() -> None:
             "constructed from a name and a domain. The **Rejected** tab shows the companies that "
             "failed and which requirement each one failed — that list is the honest answer to "
             "'why aren't there more?'. **Run audit** re-verifies the whole list from scratch, "
-            "independently of the run that produced it."
+            "independently of the run that produced it.\n\n"
+            "**Why the list is short.** Across 17 runs on the live web it researched 750 distinct "
+            "companies; 17 published a founder email that could be verified, and one of those was "
+            "also inside the band with no US presence. Most companies publish a contact form and "
+            "an `info@`, and the databases that would close that gap are paywalled. Fifteen rows "
+            "were available at any moment by guessing `firstname@company.com`; none of them would "
+            "have been true. The measured funnel is in `docs/RESULTS.md`."
         )
 
     settings_now = get_settings()

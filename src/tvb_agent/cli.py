@@ -16,6 +16,7 @@ from pathlib import Path
 from .agent import LeadAgent
 from .config import get_settings
 from .export import leads_to_csv, leads_to_json
+from .seed import SHIPPED_PATH
 from .storage import Store
 
 LEVEL_PREFIX = {"success": "[OK]  ", "warn": "[WARN]", "debug": "[..]  ", "info": "[info]"}
@@ -187,6 +188,42 @@ async def _audit(args) -> int:
     return 0 if report.clean_leads == len(report.leads) else 1
 
 
+def _bank(args) -> int:
+    """Export the verified leads to a shippable file, or replay one back in.
+
+    The hosted app is judged by what it shows on open, and a reviewer should not
+    have to spend their own API credits to see whether the agent works. The bank
+    carries the real database rows - evidence, gate reasons and run stats - so a
+    shipped lead is re-checked against the current rules exactly like a
+    locally-found one when it is read back.
+    """
+    from .seed import export_bank, load_bank
+
+    if not args.export_to and not args.import_from:
+        print("Nothing to do: pass --export [PATH] or --import [PATH].")
+        return 2
+    store = Store(get_settings().db_path)
+    code = 0
+    if args.export_to:
+        n = export_bank(store, args.export_to)
+        rejected = len([lead for lead in store.leads(qualified_only=False)
+                        if not lead.qualification.qualified])
+        print(f"Exported {n} verified lead(s) to {args.export_to}, "
+              f"with up to 80 of the {rejected} rejections and the reason each one failed.")
+        if not n:
+            print("No verified leads on file yet - nothing was shipped.")
+            code = 1
+    if args.import_from:
+        n = load_bank(store, args.import_from)
+        print(f"Replayed {n} lead(s) from {args.import_from}")
+        live = len(store.leads(qualified_only=True))
+        print(f"{live} of them still pass the current rules and are on file.")
+        if not n:
+            code = 1
+    store.close()
+    return code
+
+
 def _doctor(live: bool = False) -> int:
     from .diagnostics import check_live, collect
 
@@ -286,6 +323,16 @@ def main(argv=None) -> int:
     leads.add_argument("--json", type=str, default=None)
     leads.add_argument("--csv", type=str, default=None)
 
+    bank = sub.add_parser(
+        "bank", help="ship the verified leads with the repo, or replay them back in")
+    bank.add_argument("--export", dest="export_to", nargs="?", const=str(SHIPPED_PATH),
+                      default=None, metavar="PATH",
+                      help="write every verified lead on file to a shippable JSON bank "
+                           "(default: data/shipped_leads.json)")
+    bank.add_argument("--import", dest="import_from", nargs="?", const=str(SHIPPED_PATH),
+                      default=None, metavar="PATH",
+                      help="replay a shipped bank into this database")
+
     audit = sub.add_parser(
         "audit", help="independently re-verify an exported lead list")
     audit.add_argument("path", help="path to a leads JSON file produced by `run --json`")
@@ -299,6 +346,8 @@ def main(argv=None) -> int:
         return asyncio.run(_leads(args))
     if args.command == "audit":
         return asyncio.run(_audit(args))
+    if args.command == "bank":
+        return _bank(args)
     try:
         return asyncio.run(_run(args))
     except KeyboardInterrupt:

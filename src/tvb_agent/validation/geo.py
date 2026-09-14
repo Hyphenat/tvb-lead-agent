@@ -133,8 +133,67 @@ def country_from_tld(domain: str | None) -> str | None:
     return None
 
 
+# "us" is the commonest word on the web that also spells a country. Scanning for
+# it plainly made "contact us", "join us" and "about us" - on every site on earth -
+# read as a United States mention, and the US-presence gate is the one that
+# decides whether a non-US company is eligible at all. These sets separate the
+# pronoun from the country by the company it keeps.
+_US_PRONOUN_BEFORE = {
+    "contact", "about", "join", "with", "email", "mail", "follow", "reach", "tell",
+    "ask", "help", "let", "for", "to", "of", "near", "like", "give", "show", "call",
+    "text", "meet", "trust", "choose", "hire", "support", "thank", "visit", "message",
+    "write", "and", "why", "at", "by", "from", "between", "among", "all", "made",
+}
+_US_PRONOUN_AFTER = {
+    "today", "now", "on", "at", "via", "here", "if", "a", "an", "and", "know",
+    "directly", "anytime", "your", "you", "build", "grow", "help", "so", "what",
+    "how", "why", "or", "for", "to", "with", "about", "improve", "understand",
+}
+# "US" as the country, in the shapes it actually appears in: an abbreviation with
+# stops, or the bare token next to something it can only be modifying.
+_US_ABBREV = re.compile(r"(?<![A-Za-z.])U\.S\.?A?\.?(?![A-Za-z])")
+_US_QUALIFIED = re.compile(
+    r"\b(?:the\s+us\b|us[- ](?:based|market|markets|office|offices|customers|clients|"
+    r"headquarters|hq|subsidiary|entity|entities|incorporated|incorporation|company|"
+    r"corporation|dollars?|team|operations|expansion|launch|residents?|users?|state|"
+    r"states|federal|citizens?)\b)")
+_AMERICA = re.compile(r"(?<!latin )(?<!south )(?<!north )(?<!central )\bamerica\b")
+# A US state whose name is also a sovereign country. It only counts as a US
+# signal in company with another one.
+_AMBIGUOUS_STATES = {"georgia"}
+
+
+def _bare_us_is_the_country(low: str) -> bool:
+    """Is a lowercase, unpunctuated "us" the country rather than the pronoun?"""
+    for m in re.finditer(r"\bus\b", low):
+        before = low[max(0, m.start() - 24):m.start()].split()
+        after = low[m.end():m.end() + 24].split()
+        prev = before[-1].strip(".,:;!?\u2019'\"") if before else ""
+        nxt = after[0].strip(".,:;!?\u2019'\"") if after else ""
+        if prev in _US_PRONOUN_BEFORE or nxt in _US_PRONOUN_AFTER:
+            continue          # "contact us", "us today" - the pronoun
+        if prev in ("the", "in", "across", "throughout") or nxt in (
+                "market", "based", "office", "offices", "customers", "subsidiary"):
+            return True
+    return False
+
+
+def mentions_the_united_states(text: str) -> bool:
+    """Does this text name the United States - as a country, not as a pronoun?"""
+    raw = text or ""
+    low = raw.lower()
+    if not low:
+        return False
+    for name in ("united states of america", "united states", "u.s.a.", "usa"):
+        if re.search(rf"\b{re.escape(name)}\b", low):
+            return True
+    if _US_ABBREV.search(raw) or _US_QUALIFIED.search(low) or _AMERICA.search(low):
+        return True
+    return _bare_us_is_the_country(low)
+
+
 def _us_place_in(text: str) -> bool:
-    """Does this phrase name a US state or city?
+    """Does this phrase name the United States, or a US state or city?
 
     CITY_COUNTRY and TLD_COUNTRY contain no US entries, so every other lookup in
     this module is structurally blind to the United States: "Austin, Texas" and
@@ -143,11 +202,19 @@ def _us_place_in(text: str) -> bool:
     US-presence gate with a rationale asserting it had no US footprint.
     """
     low = (text or "").lower()
-    if any(re.search(rf"\b{re.escape(n)}\b", low) for n in US_NAMES):
+    if mentions_the_united_states(text or ""):
         return True
     if any(re.search(rf"\b{re.escape(c)}\b", low) for c in US_CITIES):
         return True
-    return any(re.search(rf"\b{re.escape(st)}\b", low) for st in US_STATES)
+    plain = {st for st in US_STATES if st not in _AMBIGUOUS_STATES}
+    if any(re.search(rf"\b{re.escape(st)}\b", low) for st in plain):
+        return True
+    # Georgia is a country as well as a state: it needs a second US signal.
+    return any(
+        re.search(rf"\b{re.escape(st)}\b", low) and (
+            re.search(r"\b(?:usa|u\.s\.a?\.?|united states|atlanta|savannah)\b", low))
+        for st in _AMBIGUOUS_STATES
+    )
 
 
 def country_from_city(text: str | None) -> tuple[str | None, str | None]:
@@ -245,17 +312,55 @@ DEMONYM_COUNTRY: dict[str, str] = {
 }
 
 
-def country_from_demonym(text: str | None) -> str | None:
-    """"a Kenyan fintech startup" -> Kenya."""
+# Words that turn a demonym into a claim about a *company* rather than a stray
+# mention of a nationality. "Little Talk in Slow French" is a podcast title on a
+# hosting platform's home page; "the French fintech startup" locates a business.
+# Without this anchor the agent read the first as a headquarters and shipped a
+# US-owned company as French.
+_ORG_NOUN = (r"(?:start-?ups?|scale-?ups?|compan(?:y|ies)|firms?|businesses|business|ventures?|"
+             r"platforms?|providers?|vendors?|makers?|developers?|studios?|agenc(?:y|ies)|"
+             r"groups?|teams?|founders?|co-?founders?|entrepreneurs?|fintechs?|proptech|"
+             r"insurtech|healthtech|edtech|adtech|deeptech|marketplaces?|unicorns?|saas|"
+             r"software|technology|tech|banks?|lenders?|retailers?|operators?|"
+             r"manufacturers?|brands?|enterprises?|corporations?|subsidiar(?:y|ies)|"
+             r"maker|outfit|venture-backed)")
+
+
+def demonym_describes_a_company(text: str | None, demonym: str) -> bool:
+    """Does this demonym modify a company, or is it just a word on the page?
+
+    Accepts "Kenyan AI startup", "the French fintech", "Estonian-based" - the
+    demonym attached to an organisation - and rejects a nationality that merely
+    occurs in a title, a language name or a list of content.
+    """
+    low = (text or "").lower()
+    d = re.escape(demonym)
+    # "Estonian-based", "French-headquartered"
+    if re.search(rf"\b{d}[- ](?:based|headquartered|owned|founded|registered)\b", low):
+        return True
+    # "the French startup", "Kenyan AI-driven lending startup" - up to three
+    # words of qualifier between the demonym and the thing it describes.
+    return bool(
+        re.search(rf"\b{d}\b(?:[ -][a-z0-9&.\u2019'-]{{1,18}}){{0,3}}[ -]{_ORG_NOUN}\b", low))
+
+
+def country_from_demonym(text: str | None, *, must_describe_a_company: bool = False) -> str | None:
+    """"a Kenyan fintech startup" -> Kenya.
+
+    With ``must_describe_a_company`` the demonym must actually modify a company;
+    a nationality appearing anywhere in the text is not enough.
+    """
     # The US is checked first: a phrase naming both ("London and New York")
     # must not resolve to the other country.
     if _us_place_in(text or ""):
-        return ("United States", None) if "city" in "country_from_text" else "United States"
+        return "United States"
     low = (text or "").lower()
     if not low:
         return None
     # Longest first, so "south korean" is not read as "korean".
     for demonym in sorted(DEMONYM_COUNTRY, key=len, reverse=True):
         if re.search(rf"\b{re.escape(demonym)}\b", low):
+            if must_describe_a_company and not demonym_describes_a_company(low, demonym):
+                continue
             return DEMONYM_COUNTRY[demonym]
     return None

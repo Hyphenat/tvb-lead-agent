@@ -4,25 +4,32 @@ An autonomous discovery-and-qualification agent that finds technology companies 
 **The Venture Build's** target profile, verifies them against evidence, and returns only the
 leads a TVB operator could contact today.
 
-> **Live app:** _(add your Streamlit URL here after deploying)_
-> **Repository:** _(add your GitHub URL here)_
+> **Live app:** https://tvb-lead-agent-zvfedv42etsdexrmrbqsiy.streamlit.app/
+> **Repository:** https://github.com/Hyphenat/tvb-lead-agent
 
 ### Start here
 
 | If you want to… | Go to |
 |---|---|
 | **Run it with your own API key** | [`docs/SETUP.md`](docs/SETUP.md) — or just paste a key into the **🔑 Use your own API keys** panel in the hosted app's sidebar |
-| **See what it actually produced, and what that cost** | [`docs/RESULTS.md`](docs/RESULTS.md) — the measured funnel over 1,077 researched companies |
+| **See what it actually produced, and what that cost** | [`docs/RESULTS.md`](docs/RESULTS.md) — the measured funnel over 750 researched companies |
 | **See the shape of a lead without running anything** | [`docs/SAMPLE-OUTPUT.md`](docs/SAMPLE-OUTPUT.md) — from the test fixtures, clearly not real companies |
 | **Understand why the number is small** | [Limitations](#limitations-and-the-measured-cost-of-them), below |
 
 **Read this before judging the output.** This agent returns *fewer* leads than the brief's
-minimum of 15, and that is a deliberate, measured choice rather than an unfinished one. Over 1,077
-researched companies, **1.3% yielded a verified founder email** — most companies simply do not
-publish one, and the contact databases that would close that gap are paywalled. The alternative was
-to construct addresses like `firstname@company.com`, which would produce fifteen rows instantly and
-every one of them a guess. [`docs/RESULTS.md`](docs/RESULTS.md) sets out the full funnel, what was
-refused to keep the number honest, and exactly which two levers would change it.
+minimum of 15, and that is a deliberate, measured choice rather than an unfinished one. Across 17
+runs it researched 750 distinct companies on the live web; **17 of them published a founder email
+that could be verified**, and one of those also sat inside the $1M–$5M band with no US presence.
+That one is the lead on file. Most companies simply do not publish a founder's address, and the
+contact databases that would close that gap are paywalled. The alternative was to construct
+addresses like `firstname@company.com` — fifteen rows instantly, every one a guess.
+
+**So the hosted app opens with what actually happened**: the verified lead, and 80 rejected
+companies each carrying the requirement it failed and the sentence behind that verdict. The
+rejections are the substance of the result, not an apology for it.
+[`docs/RESULTS.md`](docs/RESULTS.md) sets out the full funnel, the five earlier "qualified" leads
+that later rules retroactively dropped (with reasons), and the two levers that would change the
+number.
 
 ---
 
@@ -40,7 +47,7 @@ it works.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q          # 556 tests, no API key needed - the whole pipeline
+python -m pytest -q          # 565 tests, no API key needed - the whole pipeline
                              # runs against a simulated web with no network access
 cp .env.example .env         # run this ONCE; running it again wipes your keys
 # edit .env, then:
@@ -422,7 +429,7 @@ Run `python -m pytest -q` — **258 tests, no network access required**.
 
 Built and evaluated entirely on free tiers. Those limits are not a footnote —
 they set the size of the output, and [`docs/RESULTS.md`](docs/RESULTS.md) has
-the full measured funnel across 14 runs. The short version:
+the full measured funnel across 17 runs. The short version:
 
 | Constraint | Effect |
 |---|---|
@@ -433,8 +440,8 @@ the full measured funnel across 14 runs. The short version:
 | ZeroBounce: 100 verifications | Deliverability falls back to authoritative-source attribution + MX, recorded on each lead |
 
 **The binding constraint is not search, and it is not the code.** Measured over
-1,077 researched companies, **1.3% yielded a verified founder email**. Most
-companies simply do not publish one. Everything else in the pipeline — funding
+750 researched companies, **17 published a founder email that could be verified**
+— 2.3%. Most companies simply do not publish one. Everything else in the pipeline — funding
 in band, a real platform, no US footprint, a named founder — clears far more
 often than that.
 

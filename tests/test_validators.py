@@ -590,3 +590,70 @@ def test_one_footer_phone_number_does_not_disqualify_a_company():
     assessment = USPresenceAssessment(level=USPresenceLevel.MINIMAL, signals=signals,
                                       rationale="test")
     assert assessment.weak_signal_count == 1
+
+
+# --------------------------------------------------------------------------- #
+# A country has to be a statement about the company, not a word on the page
+# --------------------------------------------------------------------------- #
+def test_a_nationality_in_page_content_is_not_a_headquarters():
+    """The Spreaker failure, pinned.
+
+    A podcast hosting platform's home page lists shows in many languages. One of
+    them was "Little Talk in Slow French", and the agent read it as a French
+    headquarters - which cleared the US-presence gate for a company owned by a
+    US broadcaster. A demonym only locates a company when it modifies one.
+    """
+    from tvb_agent.validation.geo import country_from_demonym
+
+    assert country_from_demonym("Little Talk in Slow French",
+                                must_describe_a_company=True) is None
+    assert country_from_demonym("Learn Japanese with us - episode 12",
+                                must_describe_a_company=True) is None
+    # And the real phrasings still resolve.
+    assert country_from_demonym("the French fintech startup raised",
+                                must_describe_a_company=True) == "France"
+    assert country_from_demonym("a Kenyan AI-driven lending startup",
+                                must_describe_a_company=True) == "Kenya"
+    assert country_from_demonym("the Vietnamese studio behind the app",
+                                must_describe_a_company=True) == "Vietnam"
+    assert country_from_demonym("Estonian-based, founded 2021",
+                                must_describe_a_company=True) == "Estonia"
+
+
+def test_a_banked_lead_whose_country_quote_locates_nobody_is_dropped(monkeypatch):
+    """And the fix reaches backwards, into leads already on file."""
+    from decimal import Decimal
+
+    from tvb_agent.models import (
+        CompanyProfile,
+        EmailRecord,
+        EmailStatus,
+        Evidence,
+        Evidenced,
+        MoneyAmount,
+        Person,
+        SourceAuthority,
+    )
+    from tvb_agent.validation.validators import lead_fails_current_rules
+
+    def profile_with(quote: str) -> CompanyProfile:
+        ev = Evidence(url="https://example.com/", quote=quote,
+                      authority=SourceAuthority.COMPANY_OWNED)
+        return CompanyProfile(
+            id="example.com", name="Example", domain="example.com",
+            website=Evidenced.of("https://example.com", [ev]),
+            country=Evidenced.of("France", [ev]),
+            funding=Evidenced.of(MoneyAmount(raw="$2M", amount_original=Decimal("2000000"),
+                                             currency="USD", amount_usd=Decimal("2000000"),
+                                             fx_rate=Decimal("1"), fx_date="2026-01-01"), [ev]),
+            founder=Evidenced.of(Person(name="Marie Dupont", title="CEO"), [ev]),
+            email=EmailRecord(address="marie@example.com", status=EmailStatus.VERIFIED,
+                              mx_ok=True, evidence=[ev]),
+        )
+
+    bad = lead_fails_current_rules(profile_with("Little Talk in Slow French"))
+    assert bad and "never says where" in bad
+
+    assert lead_fails_current_rules(profile_with("Example is based in Paris, France.")) is None
+    assert lead_fails_current_rules(
+        profile_with("Example is a French software company.")) is None

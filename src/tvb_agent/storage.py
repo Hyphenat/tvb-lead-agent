@@ -196,6 +196,24 @@ class Store:
                 (now_iso(), status, json.dumps(stats, default=str), note, run_id),
             )
 
+    def record_run_row(self, row: dict[str, Any]) -> None:
+        """Insert a run exactly as it was recorded elsewhere, timestamps intact.
+
+        Used when a bank of leads is replayed from ``data/shipped_leads.json``:
+        the run that found a lead should keep its own id, start time and stats,
+        so the history tab says what that run actually cost rather than when the
+        file happened to be imported.
+        """
+        with self._cur() as c:
+            c.execute(
+                """INSERT OR REPLACE INTO runs
+                   (id, started_at, finished_at, status, params_json, stats_json, note)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (str(row.get("id")), row.get("started_at") or now_iso(),
+                 row.get("finished_at"), row.get("status") or "finished",
+                 row.get("params_json"), row.get("stats_json"), row.get("note") or ""),
+            )
+
     def list_runs(self, limit: int = 25) -> list[dict]:
         with self._cur() as c:
             rows = c.execute("SELECT * FROM runs ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()

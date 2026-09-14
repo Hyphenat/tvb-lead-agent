@@ -26,10 +26,12 @@ from ..models import (
 )
 from ..research.extractor import Claim, ExtractionResult
 from .geo import (
+    DEMONYM_COUNTRY,
     country_from_city,
     country_from_demonym,
     country_from_text,
     country_from_tld,
+    demonym_describes_a_company,
     is_us_country,
     normalise_country,
 )
@@ -400,15 +402,17 @@ def validate_country(result: ExtractionResult, domain: str | None,
             if country:
                 return Evidenced.of(country, [src.evidence(sentence_containing(src.text, m.start(), m.end()))])
 
-    # A demonym is the weakest of the textual signals, so it is tried last and
-    # only in a sentence that names the company.
+    # A demonym is the weakest of the textual signals, so it is tried last, only
+    # in a sentence that names the company, and only where the demonym actually
+    # modifies a company. A podcast title on a hosting platform's home page
+    # ("Little Talk in Slow French") once became a French headquarters this way.
     for src in sources:
         for m in re.finditer(r"[A-Za-z][^\n.;]{10,300}", src.text or ""):
             sentence = m.group(0)
             if (src.authority is not SourceAuthority.COMPANY_OWNED and company_name
                     and not mentions_company(sentence, company_name)):
                 continue
-            country = country_from_demonym(sentence)
+            country = country_from_demonym(sentence, must_describe_a_company=True)
             if country:
                 return Evidenced.of(country, [src.evidence(sentence.strip())], confidence=0.6)
 
@@ -684,4 +688,49 @@ def lead_fails_current_rules(profile) -> str | None:
                 f"${settings.min_amount_usd/1e6:.0f}M-${settings.max_amount_usd/1e6:.0f}M band")
     if not profile.email.is_verified:
         return f"the email is {profile.email.status.value}, not verified"
+
+    # Where a company is based decides the US-presence gate, so the sentence
+    # behind the country has to actually locate the company. A podcast title on
+    # a hosting platform's home page - "Little Talk in Slow French" - was read as
+    # a French headquarters, and the lead that produced is a US-owned company.
+    why = country_evidence_is_not_locating(profile)
+    if why:
+        return why
     return None
+
+
+_LOCATING_CUE = re.compile(
+    r"\b(?:based|headquarter(?:s|ed)?|head office|headoffice|hq|located|situated|"
+    r"registered(?: office| in| at)?|offices? in|our office|founded in|incorporated in|"
+    r"operating out of|address)\b", re.I)
+
+
+def country_evidence_is_not_locating(profile) -> str | None:
+    """Does the quote behind the country actually say where the company is?
+
+    An inferred country (a country-code TLD) is allowed through: it is marked
+    INFERRED, carries no borrowed standing, and the US-presence gate weighs it
+    accordingly. What is not allowed is a quotation that never located anybody -
+    a nationality that happens to appear in a page's content.
+    """
+    country = getattr(profile, "country", None)
+    value = getattr(country, "value", None)
+    if not value:
+        return None
+    for ev in getattr(country, "evidence", []) or []:
+        quote = (ev.quote or "")
+        note = (ev.note or "")
+        if "INFERRED" in note:
+            return None                      # the TLD rung, honestly labelled
+        if _LOCATING_CUE.search(quote):
+            return None
+        # A city or country named outright ("Paris, France", "Nairobi") locates
+        # a company as plainly as the word "based" does.
+        if normalise_country(quote) or country_from_city(quote)[0]:
+            return None
+        for demonym in DEMONYM_COUNTRY:
+            if (re.search(rf"\b{re.escape(demonym)}\b", quote.lower())
+                    and demonym_describes_a_company(quote, demonym)):
+                return None
+    return (f"the evidence for {value} never says where {profile.name} is based - "
+            f"it quotes a page that merely mentions the place")

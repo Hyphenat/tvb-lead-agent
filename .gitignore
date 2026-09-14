@@ -14,6 +14,9 @@ data/*.db
 *.json
 !package.json
 !tests/**/*.json
+# The verified leads that ship with the repo, so the hosted app opens with
+# real output instead of an empty page. Contains no keys and no private data.
+!data/shipped_leads.json
 
 # Python
 __pycache__/
