@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tvb-lead-agent"
+version = "1.0.0"
+description = "Autonomous discovery and qualification of non-US technology companies matching The Venture Build's target profile"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "streamlit>=1.40,<2",
+    "httpx>=0.27,<1",
+    "pydantic>=2.7,<3",
+    "selectolax>=0.3.21",
+    "dnspython>=2.6",
+    "tenacity>=8.2",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "respx>=0.21", "ruff>=0.5"]
+
+[project.scripts]
+tvb-agent = "tvb_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501", "B008", "SIM108", "UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+"app/streamlit_app.py" = ["E402"]   # sys.path must be set before package imports
+"tests/conftest.py" = ["E402"]      # same reason

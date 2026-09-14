@@ -1,0 +1,37 @@
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.key
+*.pem
+
+# Data produced by runs
+data/*.sqlite3
+data/*.sqlite3-*
+data/*.db
+*.csv
+*.json
+!package.json
+!tests/**/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
